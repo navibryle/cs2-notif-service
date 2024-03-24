@@ -1,4 +1,0 @@
-Failed to unmarshal bitkskins json object: json: cannot unmarshal object into Go value of type []main.BitskinsJson
-
-ype stringCould not convert json result to go struct
- err: json: cannot unmarshal bool into Go struct field Steam.success of type string

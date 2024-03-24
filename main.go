@@ -83,7 +83,7 @@ func convertToFrontEndForm(aString string) string{
 func writeToLogFile(content string){
     n,err := logFile.Write([]byte(content+"\n"))
     if err != nil || n != len([]byte(content)){
-        fmt.Println("Error when writing:\n",content,"\n to the log file")
+        fmt.Println("Error when writing:\n",content,"\n to the log file\n","log writing error:",err.Error())
     }
 }
 
@@ -178,7 +178,17 @@ type BitskinsJsonEntry struct{
     PriceMin int `json:"price_min"`
     SkinId int `json:"skin_id"`
 }
-func updateBitskinsTable(){
+
+func updateBitskinsTable(entry BitskinsJsonEntry){
+    _,err1 := db.Query(`
+        CALL UPDATE_BITSKIN(?,?,?);
+    `,entry.SkinId,entry.Name,entry.PriceMin)
+    if err1 != nil{
+        writeToLogFile("Failed to update bitskin entry with error: "+err1.Error()+"\n with the following data: "+entry.Name)
+    }
+}
+
+func pollBitskins(){
     url := "https://api.bitskins.com/market/insell/730"
     resp,err := http.Get(url)
     if err != nil{
@@ -193,14 +203,18 @@ func updateBitskinsTable(){
     if err1 != nil{
         writeToLogFile("Failed to unmarshal bitkskins json object: "+err1.Error())
     }
-    for i := 0; i < 5; i++{
-        fmt.Println(res.Entry[i].Name)
+    for i := 0; i < len(res.Entry); i++{
+        e := res.Entry[i]
+        row,err2 := db.Query(`CALL UPDATE_BITSKIN(?,?,?);`,e.SkinId,e.Name,e.PriceMin)
+        if err2 != nil{
+            writeToLogFile("Failed to update bitskin entry with error: "+err2.Error())
+        }
+        row.Close()
     }
 }
 
 
-func tmp(){
-    db,err := sql.Open("mysql","admin:admin@tcp(localhost:3306)/CS")
+func pollWatchlist(){
     res,err := db.Query(`
     SELECT s.NAME,s.GUN_NAME,u.email,w.PRICE,w.TIER
     FROM 
@@ -227,7 +241,7 @@ func tmp(){
             steamQuery(notifData)
         }
     }
-    defer db.Close()
+    res.Close()
     errCheck(err)
 }
 
@@ -253,12 +267,17 @@ func sendEmail(email string, password string, message []byte,to []string){
 }
 
 func main() { 
-    logFileTmp,err := os.OpenFile("cs2Log.txt", os.O_WRONLY | os.O_CREATE,0644)
+    logFileTmp,err := os.OpenFile("cs2Log.txt", os.O_APPEND | os.O_CREATE,0644)
     logFile = logFileTmp
     if err != nil{
         fmt.Printf("Could create or open log file\n");
     }
-    updateBitskinsTable()
+    db,_ = sql.Open("mysql","admin:admin@tcp(localhost:3306)/CS")
+    if err != nil{
+        writeToLogFile("Could not open database connection to update bitskins table")
+    }
+    pollBitskins()
+    db.Close()
 }
 
 func errCheck(err error){
