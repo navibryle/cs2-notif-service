@@ -162,11 +162,15 @@ func steamQuery(notifData NOTIF_DATA){
                if (isGE(getPrice(notifData.PRICE),getPrice(steamPrice.LowestPrice))){
                 msg := "Gun "+ notifData.GUN_NAME + " " + notifData.SKIN_NAME + " " + notifData.TIER + 
                 " is now for sale for under "+notifData.PRICE + "USD in steam";
-                sendEmail(notifData.EMAIL, getSecrets().password, []byte(msg),[]string{"naviivan321@gmail.com"})
+                sendEmail(notifData.EMAIL, getSecrets().password, []byte(msg),[]string{notifData.EMAIL})
                }
             }
         }
     }
+}
+
+func bitskinsQuery(notifData NOTIF_DATA){
+    //Nova | Dark Sigil (Well-Worn)
 }
 
 type BitskinsJsonList struct{
