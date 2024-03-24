@@ -81,7 +81,7 @@ func convertToFrontEndForm(aString string) string{
 }
 
 func writeToLogFile(content string){
-    n,err := logFile.Write([]byte(content))
+    n,err := logFile.Write([]byte(content+"\n"))
     if err != nil || n != len([]byte(content)){
         fmt.Println("Error when writing:\n",content,"\n to the log file")
     }
@@ -147,7 +147,7 @@ func steamQuery(notifData NOTIF_DATA){
     url := "https://steamcommunity.com/market/priceoverview/?country=CA&currency=1&appid=730&market_hash_name=" + url.PathEscape(convertToFrontEndForm(notifData.GUN_NAME) + " | " + convertToFrontEndForm(notifData.SKIN_NAME) + " (" + notifData.TIER +")")
     resp,err := http.Get(url)
     if err != nil{
-        logFile.Write([]byte("Could not make a request to steam api for user: "+notifData.EMAIL+ "and for the gun: "+notifData.GUN_NAME+ " "+notifData.SKIN_NAME))
+        writeToLogFile("Could not make a request to steam api for user: "+notifData.EMAIL+ "and for the gun: "+notifData.GUN_NAME+ " "+notifData.SKIN_NAME)
     }
     body, err := io.ReadAll(resp.Body)
     if strings.ToLower(resp.Status) != "200 ok" {
@@ -168,6 +168,36 @@ func steamQuery(notifData NOTIF_DATA){
         }
     }
 }
+
+type BitskinsJsonList struct{
+    Entry []BitskinsJsonEntry `json:"list"`
+}
+
+type BitskinsJsonEntry struct{
+    Name string `json:"name"`
+    PriceMin int `json:"price_min"`
+    SkinId int `json:"skin_id"`
+}
+func updateBitskinsTable(){
+    url := "https://api.bitskins.com/market/insell/730"
+    resp,err := http.Get(url)
+    if err != nil{
+        writeToLogFile("Failed to make http request to bitskins api with error: " + err.Error())
+    }
+    data,err := io.ReadAll(resp.Body);
+    if err != nil{
+        writeToLogFile("Failed to translate bitskins data to golang json object "+err.Error())
+    }
+    var res BitskinsJsonList
+    err1 := json.Unmarshal(data,&res)
+    if err1 != nil{
+        writeToLogFile("Failed to unmarshal bitkskins json object: "+err1.Error())
+    }
+    for i := 0; i < 5; i++{
+        fmt.Println(res.Entry[i].Name)
+    }
+}
+
 
 func tmp(){
     db,err := sql.Open("mysql","admin:admin@tcp(localhost:3306)/CS")
@@ -228,7 +258,7 @@ func main() {
     if err != nil{
         fmt.Printf("Could create or open log file\n");
     }
-    tmp()
+    updateBitskinsTable()
 }
 
 func errCheck(err error){
