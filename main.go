@@ -108,8 +108,12 @@ func getPrice(price string) DecimalDig{
             isBeforeDot = false
         }
     }
-    tmp,err := strconv.Atoi(left)
-    if err != nil{
+    var tmp int
+    var err error
+    if left != ""{
+        tmp,err = strconv.Atoi(left)
+    }
+    if left != "" && err != nil{
         writeToLogFile("could not convert error: " + err.Error() +"\n")
     }
     return DecimalDig{left:tmp,right:right}
@@ -160,17 +164,55 @@ func steamQuery(notifData NOTIF_DATA){
         }else{
             if (steamPrice.Success){
                if (isGE(getPrice(notifData.PRICE),getPrice(steamPrice.LowestPrice))){
-                msg := "Gun "+ notifData.GUN_NAME + " " + notifData.SKIN_NAME + " " + notifData.TIER + 
-                " is now for sale for under "+notifData.PRICE + "USD in steam";
+                msg := convertToFrontEndForm(notifData.GUN_NAME) + " " +convertToFrontEndForm(notifData.SKIN_NAME) + " " + notifData.TIER + 
+                " is now for sale for under "+notifData.PRICE + " USD in steam";
                 sendEmail(notifData.EMAIL, getSecrets().password, []byte(msg),[]string{notifData.EMAIL})
                }
             }
         }
     }
 }
+type BitskinDbEntry struct{
+    id int
+    name string
+    lowestPrice int
+}
+
+// the first 3 digits of any bitskins item are fractional parts of the decimal
+func formatBitskinPrice(price string) string{
+    for len(price) < 3{
+        price += "0"+price
+    }
+    var right string
+    var left string
+    for i := len(price) -1; i >= 0;i--{
+        if (len(right) < 3){
+            right += string(price[i])
+        }else{
+            left += string(price[i])
+        }
+    }
+    return left+"."+right
+}
 
 func bitskinsQuery(notifData NOTIF_DATA){
-    //Nova | Dark Sigil (Well-Worn)
+    res,err := db.Query("CALL GET_BITSKIN(?,?,?)",notifData.SKIN_NAME,notifData.GUN_NAME,notifData.TIER);
+    if err != nil{
+        writeToLogFile("Failed to fetch guns on sale from bitskins. Error: "+err.Error())
+    }
+    for res.Next(){
+        var entry BitskinDbEntry
+        err = res.Scan(&entry.id,&entry.name,&entry.lowestPrice)
+        if err != nil{
+            writeToLogFile("Failed to parse bitskins query result into go struct. Error: "+err.Error())
+        }
+        curBitskinPrice := getPrice(formatBitskinPrice(fmt.Sprint(entry.lowestPrice)))
+        if isGE(getPrice(notifData.PRICE),curBitskinPrice){
+            msg := entry.name + " is now for sale for "+ formatBitskinPrice(fmt.Sprint(entry.lowestPrice))+ " USD\nThis was on your watchlist for "+notifData.PRICE+" USD.";
+            sendEmail(notifData.EMAIL,getSecrets().password,[]byte(msg),[]string{notifData.EMAIL})
+        }
+    }
+
 }
 
 type BitskinsJsonList struct{
@@ -183,14 +225,6 @@ type BitskinsJsonEntry struct{
     SkinId int `json:"skin_id"`
 }
 
-func updateBitskinsTable(entry BitskinsJsonEntry){
-    _,err1 := db.Query(`
-        CALL UPDATE_BITSKIN(?,?,?);
-    `,entry.SkinId,entry.Name,entry.PriceMin)
-    if err1 != nil{
-        writeToLogFile("Failed to update bitskin entry with error: "+err1.Error()+"\n with the following data: "+entry.Name)
-    }
-}
 
 func pollBitskins(){
     url := "https://api.bitskins.com/market/insell/730"
@@ -243,6 +277,7 @@ func pollWatchlist(){
         // query each market place
         if (hasPrice){
             steamQuery(notifData)
+            bitskinsQuery(notifData)
         }
     }
     res.Close()
@@ -250,8 +285,6 @@ func pollWatchlist(){
 }
 
 func sendEmail(email string, password string, message []byte,to []string){
-
-
   // smtp server configuration.
   smtpHost := "smtp.gmail.com"
   smtpPort := "587"
@@ -267,7 +300,6 @@ func sendEmail(email string, password string, message []byte,to []string){
     fmt.Println(err)
     return
   }
-  fmt.Println("Email Sent Successfully!")
 }
 
 func main() { 
@@ -280,7 +312,7 @@ func main() {
     if err != nil{
         writeToLogFile("Could not open database connection to update bitskins table")
     }
-    pollBitskins()
+    pollWatchlist()
     db.Close()
 }
 
