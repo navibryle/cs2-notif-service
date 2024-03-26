@@ -32,6 +32,7 @@ type NOTIF_DATA struct{
     EMAIL string
     PRICE string
     TIER string
+    LAST_NOTIF sql.NullTime
 }
 
 type NOTIF_DATA_NO_PRICE struct{
@@ -147,31 +148,6 @@ func isGE(dig1 DecimalDig,dig2 DecimalDig) bool{
 
 
 
-func steamQuery(notifData NOTIF_DATA){
-    url := "https://steamcommunity.com/market/priceoverview/?country=CA&currency=1&appid=730&market_hash_name=" + url.PathEscape(convertToFrontEndForm(notifData.GUN_NAME) + " | " + convertToFrontEndForm(notifData.SKIN_NAME) + " (" + notifData.TIER +")")
-    resp,err := http.Get(url)
-    if err != nil{
-        writeToLogFile("Could not make a request to steam api for user: "+notifData.EMAIL+ "and for the gun: "+notifData.GUN_NAME+ " "+notifData.SKIN_NAME)
-    }
-    body, err := io.ReadAll(resp.Body)
-    if strings.ToLower(resp.Status) != "200 ok" {
-        writeToLogFile("Steam api NON-OK status with the following url: " + url)
-    }else{
-        var steamPrice Steam
-        err := json.Unmarshal(body,&steamPrice)
-        if err != nil{
-            writeToLogFile("Could not convert json result to go struct\n err: "+err.Error())
-        }else{
-            if (steamPrice.Success){
-               if (isGE(getPrice(notifData.PRICE),getPrice(steamPrice.LowestPrice))){
-                msg := convertToFrontEndForm(notifData.GUN_NAME) + " " +convertToFrontEndForm(notifData.SKIN_NAME) + " " + notifData.TIER + 
-                " is now for sale for under "+notifData.PRICE + " USD in steam";
-                sendEmail(notifData.EMAIL, getSecrets().password, []byte(msg),[]string{notifData.EMAIL})
-               }
-            }
-        }
-    }
-}
 type BitskinDbEntry struct{
     id int
     name string
@@ -251,37 +227,94 @@ func pollBitskins(){
     }
 }
 
+func sendSteamEmail(notifData NOTIF_DATA,steamPrice string){
+    if (isGE(getPrice(notifData.PRICE),getPrice(steamPrice))){
+        msg := convertToFrontEndForm(notifData.GUN_NAME) + " " +convertToFrontEndForm(notifData.SKIN_NAME) + " " + notifData.TIER + 
+        " is now for sale for under "+notifData.PRICE + " USD in steam";
+        sendEmail(notifData.EMAIL, getSecrets().password, []byte(msg),[]string{notifData.EMAIL})
+    }
+}
+
+func steamQuery(notifData NOTIF_DATA)string{
+    url := "https://steamcommunity.com/market/priceoverview/?country=CA&currency=1&appid=730&market_hash_name=" + url.PathEscape(convertToFrontEndForm(notifData.GUN_NAME) + " | " + convertToFrontEndForm(notifData.SKIN_NAME) + " (" + notifData.TIER +")")
+    resp,err := http.Get(url)
+    if err != nil{
+        writeToLogFile("Could not make a request to steam api for user: "+notifData.EMAIL+ "and for the gun: "+notifData.GUN_NAME+ " "+notifData.SKIN_NAME)
+    }
+    body, err := io.ReadAll(resp.Body)
+    if strings.ToLower(resp.Status) != "200 ok" {
+        writeToLogFile("Steam api NON-OK status with the following url: " + url)
+    }else{
+        var steamPrice Steam
+        err := json.Unmarshal(body,&steamPrice)
+        if err != nil{
+            writeToLogFile("Could not convert json result to go struct\n err: "+err.Error())
+        }else{
+            if (steamPrice.Success){
+                sendSteamEmail(notifData,steamPrice.LowestPrice)
+               return steamPrice.LowestPrice;
+            }
+        }
+    }
+    return "-1"
+}
+
+func steamPoll(notifDataList []NOTIF_DATA){
+    for true{
+        cache := make(map[string]string)
+        for _,i := range notifDataList{
+            cacheKey := i.GUN_NAME+";"+i.SKIN_NAME
+            val,ok := cache[cacheKey]
+            if (ok){
+                sendSteamEmail(i,val)
+            }else{
+                res := steamQuery(i)
+                if res != "-1"{
+                    cache[cacheKey] = res
+                }
+            }
+        }
+    }
+}
+
 
 func pollWatchlist(){
     res,err := db.Query(`
-    SELECT s.NAME,s.GUN_NAME,u.email,w.PRICE,w.TIER
-    FROM 
+    SELECT s.NAME,s.GUN_NAME,u.email,w.PRICE,w.TIER,w.LAST_NOTIF
+    FROM
         WATCHLIST as w,
         SKINS as s,
         User as u
     WHERE
         w.SKIN_ID = s.ID AND
         w.USER_ID = u.id;`);
+    notifDataList := make([]NOTIF_DATA,0)
     for res.Next(){
         var notifData NOTIF_DATA
         var notifDataNoPrice NOTIF_DATA_NO_PRICE
         hasPrice := true
-        err = res.Scan(&notifData.SKIN_NAME,&notifData.GUN_NAME,&notifData.EMAIL,&notifData.PRICE,&notifData.TIER)
+        err = res.Scan(&notifData.SKIN_NAME,&notifData.GUN_NAME,&notifData.EMAIL,&notifData.PRICE,&notifData.TIER,&notifData.LAST_NOTIF)
         if err != nil{
             hasPrice = false
-            err = res.Scan(&notifDataNoPrice.SKIN_NAME,&notifDataNoPrice.GUN_NAME,&notifDataNoPrice.EMAIL,&notifDataNoPrice.PRICE,&notifDataNoPrice.TIER)
+            err = res.Scan(&notifDataNoPrice.SKIN_NAME,&notifDataNoPrice.GUN_NAME,&notifDataNoPrice.EMAIL,&notifDataNoPrice.PRICE,&notifDataNoPrice.TIER,&notifData.LAST_NOTIF)
             if err != nil{
                 writeToLogFile("Could not process user data from database")
             }
         }
         // query each market place
         if (hasPrice){
-            steamQuery(notifData)
-            bitskinsQuery(notifData)
+            fmt.Fprintf(os.Stderr, "DEBUGPRINT[1]: main.go:306 (after if (hasPrice))\n")
+            if (notifData.LAST_NOTIF.Valid){
+                fmt.Printf("time: %s\n",notifData.LAST_NOTIF.Time.String())
+            }else{
+                fmt.Println("Invalid time");
+            }
+            notifDataList = append(notifDataList,notifData)
         }
     }
     res.Close()
     errCheck(err)
+    // TODO: Start threads for each market place
 }
 
 func sendEmail(email string, password string, message []byte,to []string){
