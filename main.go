@@ -187,20 +187,12 @@ func bitskinsQuery(notifData NOTIF_DATA){
         }
         curBitskinPrice := getPrice(formatBitskinPrice(fmt.Sprint(entry.lowestPrice)))
         if isGE(getPrice(notifData.PRICE),curBitskinPrice){
-            msg := entry.name + " is now for sale for "+ formatBitskinPrice(fmt.Sprint(entry.lowestPrice))+ " USD\nThis was on your watchlist for "+notifData.PRICE+" USD.";
+            msg := "Subject: Bitskins watchlist notification \r\n\r\n" + entry.name + " is now for sale on bitskins for "+ formatBitskinPrice(fmt.Sprint(entry.lowestPrice))+ " USD.\nThis was on your watchlist for "+notifData.PRICE+" USD.";
+            setNotifdataDate(notifData)
             sendEmail(notifData.EMAIL,getSecrets().password,[]byte(msg),[]string{notifData.EMAIL})
         }
     }
 
-}
-
-func bitskinsPoll(){
-    for{
-        notifData := <-watchListChan
-        setNotifdataDate(notifData)
-        go bitskinsQuery(notifData)
-        time.Sleep(1*time.Second)
-    }
 }
 
 type BitskinsJsonList struct{
@@ -250,14 +242,13 @@ func setNotifdataDate(notifData NOTIF_DATA){
 
 func sendSteamEmail(notifData NOTIF_DATA,steamPrice string){
     if (isGE(getPrice(notifData.PRICE),getPrice(steamPrice))){
-        msg := convertToFrontEndForm(notifData.GUN_NAME) + " " +convertToFrontEndForm(notifData.SKIN_NAME) + " " + notifData.TIER + 
-        " is now for sale for under "+notifData.PRICE + " USD in steam";
+        msg :="Subject: Steam watchlist notification \r\n\r\n" + convertToFrontEndForm(notifData.GUN_NAME) + " " +convertToFrontEndForm(notifData.SKIN_NAME) + " (" + notifData.TIER + 
+        ") is now for sale for "+steamPrice + " in steam.\nThis was on your watchlist for "+notifData.PRICE +" USD";
         sendEmail(notifData.EMAIL, getSecrets().password, []byte(msg),[]string{notifData.EMAIL})
     }
 }
 
 func steamQuery(notifData NOTIF_DATA){
-    // TODO: when the email fails reset the LAST_NOTIF row of the db entry
     url := "https://steamcommunity.com/market/priceoverview/?country=CA&currency=1&appid=730&market_hash_name=" + url.PathEscape(convertToFrontEndForm(notifData.GUN_NAME) + " | " + convertToFrontEndForm(notifData.SKIN_NAME) + " (" + notifData.TIER +")")
     resp,err := http.Get(url)
     if err != nil{
@@ -273,17 +264,18 @@ func steamQuery(notifData NOTIF_DATA){
             writeToLogFile("Could not convert json result to go struct\n err: "+err.Error())
         }else{
             if (steamPrice.Success){
+                setNotifdataDate(notifData)
                 sendSteamEmail(notifData,steamPrice.LowestPrice)
             }
         }
     }
 }
 
-func steamPoll(){
+func marketQuery(){
     for{
         notifData := <- watchListChan
-        setNotifdataDate(notifData)
         go steamQuery(notifData)
+        go bitskinsQuery(notifData)
         time.Sleep(1*time.Second)
     }
 }
@@ -347,8 +339,7 @@ func main() {
         writeToLogFile("Could not open database connection to update bitskins table")
     }
     go pollWatchlist() // producer
-    go steamPoll() // consumer
-    go bitskinsPoll() // consumer
+    go marketQuery() // consumer
     for {
         //infinite loop to keep the routines running
     }
