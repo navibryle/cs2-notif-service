@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"database/sql"
@@ -19,6 +20,7 @@ import (
 )
 
 var db *sql.DB
+var watchListChan chan NOTIF_DATA;
 
 type SKIN struct{
     ID int64
@@ -172,6 +174,7 @@ func formatBitskinPrice(price string) string{
 }
 
 func bitskinsQuery(notifData NOTIF_DATA){
+    // TODO: reset the LAST_NOTIF date on the db record if the email fails to get sent
     res,err := db.Query("CALL GET_BITSKIN(?,?,?)",notifData.SKIN_NAME,notifData.GUN_NAME,notifData.TIER);
     if err != nil{
         writeToLogFile("Failed to fetch guns on sale from bitskins. Error: "+err.Error())
@@ -189,6 +192,15 @@ func bitskinsQuery(notifData NOTIF_DATA){
         }
     }
 
+}
+
+func bitskinsPoll(){
+    for{
+        notifData := <-watchListChan
+        setNotifdataDate(notifData)
+        go bitskinsQuery(notifData)
+        time.Sleep(1*time.Second)
+    }
 }
 
 type BitskinsJsonList struct{
@@ -227,6 +239,15 @@ func pollBitskins(){
     }
 }
 
+// set the notif date to now
+func setNotifdataDate(notifData NOTIF_DATA){
+    res,err := db.Query("CALL UPDATE_NOTIF(?,?,?,?)",notifData.SKIN_NAME,notifData.GUN_NAME,notifData.EMAIL,time.Now().UTC())
+    if err != nil{
+        writeToLogFile("Failed to update watchlist row last notif date with error: \n"+err.Error())
+    }
+    res.Close()
+}
+
 func sendSteamEmail(notifData NOTIF_DATA,steamPrice string){
     if (isGE(getPrice(notifData.PRICE),getPrice(steamPrice))){
         msg := convertToFrontEndForm(notifData.GUN_NAME) + " " +convertToFrontEndForm(notifData.SKIN_NAME) + " " + notifData.TIER + 
@@ -235,7 +256,8 @@ func sendSteamEmail(notifData NOTIF_DATA,steamPrice string){
     }
 }
 
-func steamQuery(notifData NOTIF_DATA)string{
+func steamQuery(notifData NOTIF_DATA){
+    // TODO: when the email fails reset the LAST_NOTIF row of the db entry
     url := "https://steamcommunity.com/market/priceoverview/?country=CA&currency=1&appid=730&market_hash_name=" + url.PathEscape(convertToFrontEndForm(notifData.GUN_NAME) + " | " + convertToFrontEndForm(notifData.SKIN_NAME) + " (" + notifData.TIER +")")
     resp,err := http.Get(url)
     if err != nil{
@@ -243,7 +265,7 @@ func steamQuery(notifData NOTIF_DATA)string{
     }
     body, err := io.ReadAll(resp.Body)
     if strings.ToLower(resp.Status) != "200 ok" {
-        writeToLogFile("Steam api NON-OK status with the following url: " + url)
+        writeToLogFile("Steam api NON-OK status with status"+ resp.Status + "the following url: " + url)
     }else{
         var steamPrice Steam
         err := json.Unmarshal(body,&steamPrice)
@@ -252,69 +274,47 @@ func steamQuery(notifData NOTIF_DATA)string{
         }else{
             if (steamPrice.Success){
                 sendSteamEmail(notifData,steamPrice.LowestPrice)
-               return steamPrice.LowestPrice;
             }
         }
     }
-    return "-1"
 }
 
-func steamPoll(notifDataList []NOTIF_DATA){
-    for true{
-        cache := make(map[string]string)
-        for _,i := range notifDataList{
-            cacheKey := i.GUN_NAME+";"+i.SKIN_NAME
-            val,ok := cache[cacheKey]
-            if (ok){
-                sendSteamEmail(i,val)
-            }else{
-                res := steamQuery(i)
-                if res != "-1"{
-                    cache[cacheKey] = res
-                }
-            }
-        }
+func steamPoll(){
+    for{
+        notifData := <- watchListChan
+        setNotifdataDate(notifData)
+        go steamQuery(notifData)
+        time.Sleep(1*time.Second)
     }
 }
 
 
 func pollWatchlist(){
-    res,err := db.Query(`
-    SELECT s.NAME,s.GUN_NAME,u.email,w.PRICE,w.TIER,w.LAST_NOTIF
-    FROM
-        WATCHLIST as w,
-        SKINS as s,
-        User as u
-    WHERE
-        w.SKIN_ID = s.ID AND
-        w.USER_ID = u.id;`);
-    notifDataList := make([]NOTIF_DATA,0)
-    for res.Next(){
-        var notifData NOTIF_DATA
-        var notifDataNoPrice NOTIF_DATA_NO_PRICE
-        hasPrice := true
-        err = res.Scan(&notifData.SKIN_NAME,&notifData.GUN_NAME,&notifData.EMAIL,&notifData.PRICE,&notifData.TIER,&notifData.LAST_NOTIF)
+    for{
+        res,err := db.Query(`CALL GET_WATCHLIST()`);
         if err != nil{
-            hasPrice = false
-            err = res.Scan(&notifDataNoPrice.SKIN_NAME,&notifDataNoPrice.GUN_NAME,&notifDataNoPrice.EMAIL,&notifDataNoPrice.PRICE,&notifDataNoPrice.TIER,&notifData.LAST_NOTIF)
+            writeToLogFile("Unable to get wat")
+        }
+        for res.Next(){
+            var notifData NOTIF_DATA
+            var notifDataNoPrice NOTIF_DATA_NO_PRICE
+            hasPrice := true
+            err = res.Scan(&notifData.SKIN_NAME,&notifData.GUN_NAME,&notifData.EMAIL,&notifData.PRICE,&notifData.TIER,&notifData.LAST_NOTIF)
             if err != nil{
-                writeToLogFile("Could not process user data from database")
+                hasPrice = false
+                err = res.Scan(&notifDataNoPrice.SKIN_NAME,&notifDataNoPrice.GUN_NAME,&notifDataNoPrice.EMAIL,&notifDataNoPrice.PRICE,&notifDataNoPrice.TIER,&notifData.LAST_NOTIF)
+                if err != nil{
+                    writeToLogFile("Could not process user data from database")
+                }
+            }
+            if (hasPrice){
+                watchListChan <- notifData
             }
         }
-        // query each market place
-        if (hasPrice){
-            fmt.Fprintf(os.Stderr, "DEBUGPRINT[1]: main.go:306 (after if (hasPrice))\n")
-            if (notifData.LAST_NOTIF.Valid){
-                fmt.Printf("time: %s\n",notifData.LAST_NOTIF.Time.String())
-            }else{
-                fmt.Println("Invalid time");
-            }
-            notifDataList = append(notifDataList,notifData)
-        }
+        res.Close()
+        errCheck(err)
+        time.Sleep(1*time.Second)
     }
-    res.Close()
-    errCheck(err)
-    // TODO: Start threads for each market place
 }
 
 func sendEmail(email string, password string, message []byte,to []string){
@@ -338,6 +338,7 @@ func sendEmail(email string, password string, message []byte,to []string){
 func main() { 
     logFileTmp,err := os.OpenFile("cs2Log.txt", os.O_APPEND | os.O_CREATE,0644)
     logFile = logFileTmp
+    watchListChan = make(chan NOTIF_DATA)
     if err != nil{
         fmt.Printf("Could create or open log file\n");
     }
@@ -345,8 +346,12 @@ func main() {
     if err != nil{
         writeToLogFile("Could not open database connection to update bitskins table")
     }
-    pollWatchlist()
-    db.Close()
+    go pollWatchlist() // producer
+    go steamPoll() // consumer
+    go bitskinsPoll() // consumer
+    for {
+        //infinite loop to keep the routines running
+    }
 }
 
 func errCheck(err error){
