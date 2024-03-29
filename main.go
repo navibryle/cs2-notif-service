@@ -84,8 +84,8 @@ func convertToFrontEndForm(aString string) string{
 }
 
 func writeToLogFile(content string){
-    n,err := logFile.Write([]byte(content+"\n"))
-    if err != nil || n != len([]byte(content)){
+    _,err := logFile.Write([]byte(content+"\n"))
+    if err != nil {
         fmt.Println("Error when writing:\n",content,"\n to the log file\n","log writing error:",err.Error())
     }
 }
@@ -174,7 +174,6 @@ func formatBitskinPrice(price string) string{
 }
 
 func bitskinsQuery(notifData NOTIF_DATA){
-    // TODO: reset the LAST_NOTIF date on the db record if the email fails to get sent
     res,err := db.Query("CALL GET_BITSKIN(?,?,?)",notifData.SKIN_NAME,notifData.GUN_NAME,notifData.TIER);
     if err != nil{
         writeToLogFile("Failed to fetch guns on sale from bitskins. Error: "+err.Error())
@@ -328,7 +327,7 @@ func sendEmail(email string, password string, message []byte,to []string){
 }
 
 func main() { 
-    logFileTmp,err := os.OpenFile("cs2Log.txt", os.O_APPEND | os.O_CREATE,0644)
+    logFileTmp,err := os.OpenFile("cs2Log.txt", os.O_WRONLY | os.O_APPEND | os.O_CREATE,0644)
     logFile = logFileTmp
     watchListChan = make(chan NOTIF_DATA)
     if err != nil{
