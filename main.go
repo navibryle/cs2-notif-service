@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -303,22 +305,18 @@ func pollWatchlist(){
             }
         }
         res.Close()
-        errCheck(err)
+        if err != nil{
+            writeToLogFile("Query to get watchlist failed with error " + err.Error())
+        }
         time.Sleep(1*time.Second)
     }
 }
 
 func sendEmail(email string, password string, message []byte,to []string){
-  // smtp server configuration.
   smtpHost := "smtp.gmail.com"
   smtpPort := "587"
-
-  // Message.
-  
-  // Authentication.
   auth := smtp.PlainAuth("", email, password, smtpHost)
   
-  // Sending email.
   err := smtp.SendMail(smtpHost+":"+smtpPort, auth, email, to, message)
   if err != nil {
     fmt.Println(err)
@@ -326,7 +324,7 @@ func sendEmail(email string, password string, message []byte,to []string){
   }
 }
 
-func main() { 
+func main() {
     logFileTmp,err := os.OpenFile("cs2Log.txt", os.O_WRONLY | os.O_APPEND | os.O_CREATE,0644)
     logFile = logFileTmp
     watchListChan = make(chan NOTIF_DATA)
@@ -344,8 +342,3 @@ func main() {
     }
 }
 
-func errCheck(err error){
-  if err != nil{
-    log.Fatal(err)
-  }
-}
