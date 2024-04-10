@@ -64,12 +64,11 @@ func getSecrets() Secret{
   if err1 != nil{
       log.Fatal(err1)
   }
-  data := make([]byte,100);
+  data := make([]byte,1000);
   count,err2 := file.Read(data)
   if err2 != nil{
       log.Fatal(err2)
   }
-
   secrets := strings.Split(strings.TrimSpace(string(data[:count])),"\n");
 
   for  _,s := range secrets{
@@ -330,9 +329,9 @@ func main() {
     if err != nil{
         fmt.Printf("Could create or open log file\n");
     }
-    db,_ = sql.Open("mysql",getSecrets().dbString)
+    db,err = sql.Open("mysql",getSecrets().dbString)
     if err != nil{
-        writeToLogFile("Could not open database connection to update bitskins table")
+        writeToLogFile("Could not open connection to database with error: "+ err.Error())
     }
     go pollWatchlist() // producer
     go marketQuery() // consumer
