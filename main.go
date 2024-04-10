@@ -192,7 +192,7 @@ func bitskinsQuery(notifData NOTIF_DATA){
             if isGE(getPrice(notifData.PRICE),curBitskinPrice){
                 msg := "Subject: Bitskins watchlist notification \r\n\r\n" + entry.name + " is now for sale on bitskins for "+ formatBitskinPrice(fmt.Sprint(entry.lowestPrice))+ " USD.\nThis was on your watchlist for "+notifData.PRICE+" USD.";
                 setNotifdataDate(notifData)
-                sendEmail(notifData.EMAIL,getSecrets().password,[]byte(msg),[]string{notifData.EMAIL})
+                sendEmail(getSecrets().email,getSecrets().password,[]byte(msg),[]string{notifData.EMAIL})
             }
         }
     }
@@ -251,7 +251,7 @@ func sendSteamEmail(notifData NOTIF_DATA,steamPrice string){
     if (isGE(getPrice(notifData.PRICE),getPrice(steamPrice))){
         msg :="Subject: Steam watchlist notification \r\n\r\n" + convertToFrontEndForm(notifData.GUN_NAME) + " " +convertToFrontEndForm(notifData.SKIN_NAME) + " (" + notifData.TIER + 
         ") is now for sale for "+steamPrice + " in steam.\nThis was on your watchlist for "+notifData.PRICE +" USD";
-        sendEmail(notifData.EMAIL, getSecrets().password, []byte(msg),[]string{notifData.EMAIL})
+        sendEmail(getSecrets().email, getSecrets().password, []byte(msg),[]string{notifData.EMAIL})
     }
 }
 
@@ -294,9 +294,7 @@ func pollWatchlist(){
         if err != nil{
             writeToLogFile("Unable to get wat")
         }
-        fmt.Fprintf(os.Stderr, "DEBUGPRINT[1]: main.go:288 (after writeToLogFile(Unable to get wat))\n")
         for res.Next(){
-            fmt.Fprintf(os.Stderr, "DEBUGPRINT[2]: main.go:290 (after for res.Next())\n")
             var notifData NOTIF_DATA
             var notifDataNoPrice NOTIF_DATA_NO_PRICE
             hasPrice := true
@@ -324,7 +322,6 @@ func sendEmail(email string, password string, message []byte,to []string){
   smtpHost := "smtp.gmail.com"
   smtpPort := "587"
   auth := smtp.PlainAuth("", email, password, smtpHost)
-  
   err := smtp.SendMail(smtpHost+":"+smtpPort, auth, email, to, message)
   if err != nil {
     writeToLogFile("could not send email with Error: "+err.Error())
