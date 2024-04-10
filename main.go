@@ -178,17 +178,19 @@ func bitskinsQuery(notifData NOTIF_DATA){
     if err != nil{
         writeToLogFile("Failed to fetch guns on sale from bitskins. Error: "+err.Error())
     }
-    for res.Next(){
-        var entry BitskinDbEntry
-        err = res.Scan(&entry.id,&entry.name,&entry.lowestPrice)
-        if err != nil{
-            writeToLogFile("Failed to parse bitskins query result into go struct. Error: "+err.Error())
-        }
-        curBitskinPrice := getPrice(formatBitskinPrice(fmt.Sprint(entry.lowestPrice)))
-        if isGE(getPrice(notifData.PRICE),curBitskinPrice){
-            msg := "Subject: Bitskins watchlist notification \r\n\r\n" + entry.name + " is now for sale on bitskins for "+ formatBitskinPrice(fmt.Sprint(entry.lowestPrice))+ " USD.\nThis was on your watchlist for "+notifData.PRICE+" USD.";
-            setNotifdataDate(notifData)
-            sendEmail(notifData.EMAIL,getSecrets().password,[]byte(msg),[]string{notifData.EMAIL})
+    if res != nil{
+        for res.Next(){
+            var entry BitskinDbEntry
+            err = res.Scan(&entry.id,&entry.name,&entry.lowestPrice)
+            if err != nil{
+                writeToLogFile("Failed to parse bitskins query result into go struct. Error: "+err.Error())
+            }
+            curBitskinPrice := getPrice(formatBitskinPrice(fmt.Sprint(entry.lowestPrice)))
+            if isGE(getPrice(notifData.PRICE),curBitskinPrice){
+                msg := "Subject: Bitskins watchlist notification \r\n\r\n" + entry.name + " is now for sale on bitskins for "+ formatBitskinPrice(fmt.Sprint(entry.lowestPrice))+ " USD.\nThis was on your watchlist for "+notifData.PRICE+" USD.";
+                setNotifdataDate(notifData)
+                sendEmail(notifData.EMAIL,getSecrets().password,[]byte(msg),[]string{notifData.EMAIL})
+            }
         }
     }
 
@@ -206,27 +208,30 @@ type BitskinsJsonEntry struct{
 
 
 func pollBitskins(){
-    url := "https://api.bitskins.com/market/insell/730"
-    resp,err := http.Get(url)
-    if err != nil{
-        writeToLogFile("Failed to make http request to bitskins api with error: " + err.Error())
-    }
-    data,err := io.ReadAll(resp.Body);
-    if err != nil{
-        writeToLogFile("Failed to translate bitskins data to golang json object "+err.Error())
-    }
-    var res BitskinsJsonList
-    err1 := json.Unmarshal(data,&res)
-    if err1 != nil{
-        writeToLogFile("Failed to unmarshal bitkskins json object: "+err1.Error())
-    }
-    for i := 0; i < len(res.Entry); i++{
-        e := res.Entry[i]
-        row,err2 := db.Query(`CALL UPDATE_BITSKIN(?,?,?);`,e.SkinId,e.Name,e.PriceMin)
-        if err2 != nil{
-            writeToLogFile("Failed to update bitskin entry with error: "+err2.Error())
+    for {
+        time.Sleep(24*time.Hour)
+        url := "https://api.bitskins.com/market/insell/730"
+        resp,err := http.Get(url)
+        if err != nil{
+            writeToLogFile("Failed to make http request to bitskins api with error: " + err.Error())
         }
-        row.Close()
+        data,err := io.ReadAll(resp.Body);
+        if err != nil{
+            writeToLogFile("Failed to translate bitskins data to golang json object "+err.Error())
+        }
+        var res BitskinsJsonList
+        err1 := json.Unmarshal(data,&res)
+        if err1 != nil{
+            writeToLogFile("Failed to unmarshal bitkskins json object: "+err1.Error())
+        }
+        for i := 0; i < len(res.Entry); i++{
+            e := res.Entry[i]
+            row,err2 := db.Query(`CALL UPDATE_BITSKIN(?,?,?);`,e.SkinId,e.Name,e.PriceMin)
+            if err2 != nil{
+                writeToLogFile("Failed to update bitskin entry with error: "+err2.Error())
+            }
+            row.Close()
+        }
     }
 }
 
@@ -286,7 +291,9 @@ func pollWatchlist(){
         if err != nil{
             writeToLogFile("Unable to get wat")
         }
+        fmt.Fprintf(os.Stderr, "DEBUGPRINT[1]: main.go:288 (after writeToLogFile(Unable to get wat))\n")
         for res.Next(){
+            fmt.Fprintf(os.Stderr, "DEBUGPRINT[2]: main.go:290 (after for res.Next())\n")
             var notifData NOTIF_DATA
             var notifDataNoPrice NOTIF_DATA_NO_PRICE
             hasPrice := true
@@ -333,6 +340,7 @@ func main() {
     if err != nil{
         writeToLogFile("Could not open connection to database with error: "+ err.Error())
     }
+    go pollBitskins() // fill up bitskins table
     go pollWatchlist() // producer
     go marketQuery() // consumer
     for {
