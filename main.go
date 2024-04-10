@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +48,7 @@ type NOTIF_DATA_NO_PRICE struct{
 type Secret struct{
     email string
     password string
+    dbString string
 }
 
 
@@ -60,7 +59,7 @@ type Steam struct{
 
 var logFile *os.File
 func getSecrets() Secret{
-  file,err1 := os.Open(".secrets")
+  file,err1 := os.Open("/home/tmp/.secrets")
   m := make(map[string]string)
   if err1 != nil{
       log.Fatal(err1)
@@ -78,7 +77,7 @@ func getSecrets() Secret{
       m[strings.TrimSpace(tmp[0])] = strings.TrimSpace(tmp[1])
   }
 
-  return Secret{m["EMAIL"],m["PASSWORD"]}
+  return Secret{m["EMAIL"],m["PASSWORD"],m["DB_URL"]}
 }
 
 func convertToFrontEndForm(aString string) string{
@@ -319,7 +318,7 @@ func sendEmail(email string, password string, message []byte,to []string){
   
   err := smtp.SendMail(smtpHost+":"+smtpPort, auth, email, to, message)
   if err != nil {
-    fmt.Println(err)
+    writeToLogFile("could not send email with Error: "+err.Error())
     return
   }
 }
