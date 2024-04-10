@@ -180,6 +180,9 @@ func bitskinsQuery(notifData NOTIF_DATA){
     }
     if res != nil{
         for res.Next(){
+            if res.Err() != nil{
+                break
+            }
             var entry BitskinDbEntry
             err = res.Scan(&entry.id,&entry.name,&entry.lowestPrice)
             if err != nil{
