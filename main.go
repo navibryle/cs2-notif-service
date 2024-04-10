@@ -330,7 +330,7 @@ func main() {
     if err != nil{
         fmt.Printf("Could create or open log file\n");
     }
-    db,_ = sql.Open("mysql","admin:admin@tcp(localhost:3306)/CS")
+    db,_ = sql.Open("mysql",getSecrets().dbString)
     if err != nil{
         writeToLogFile("Could not open database connection to update bitskins table")
     }
